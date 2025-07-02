@@ -38,10 +38,6 @@ sudo yum install ImageMagick
 
 Create the following files in the `keys/` directory:
 
-#### Google Cloud Credentials
-- File: `keys/arimidori-7a49f7f94661.json`
-- Content: Your Google Cloud service account JSON credentials
-
 #### Gemini API Key
 - File: `keys/gemini_api_key.txt`
 - Content: Your Gemini API key (just the key, no extra formatting)
