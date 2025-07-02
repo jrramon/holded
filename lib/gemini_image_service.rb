@@ -41,7 +41,14 @@ class GeminiImageService
       end
       content = response.parsed_response.dig('candidates', 0, 'content', 'parts', 0, 'text')
       json_str = extract_json_from_text(content)
-      JSON.parse(json_str, symbolize_names: true)
+      data = JSON.parse(json_str, symbolize_names: true)
+      
+      # Clean vendor_id by removing hyphens
+      if data[:vendor_id]
+        data[:vendor_id] = data[:vendor_id].gsub('-', '')
+      end
+      
+      data
     rescue => e
       raise "Failed to extract invoice data from Gemini: #{e.message}"
     ensure
@@ -67,7 +74,7 @@ class GeminiImageService
   end
 
   def build_prompt
-    "Extract the following information from this invoice image and return it as JSON with these exact field names: invoice_number, date, total_amount, vendor_name, line_items (array with description and amount), tax_amount. Only return the JSON."
+    "Extract the following information from this invoice image and return it as JSON with these exact field names: invoice_number, date, total_amount, vendor_name, vendor_id (CIF/NIF tax identification number of the company issuing the invoice - NOT the customer), line_items (array with description, amount BEFORE taxes, and tax_percentage), tax_amount. IMPORTANT: The vendor_id should be the tax ID of the company that is sending this invoice (the supplier), never use 'B02784460' as this is the customer's ID. For line_items, the amount should be the net amount BEFORE taxes are applied. Only return the JSON."
   end
 
   def extract_json_from_text(text)
