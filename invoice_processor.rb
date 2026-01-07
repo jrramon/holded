@@ -61,26 +61,33 @@ def process_single_file(file_path)
   puts "\n" + "="*60
   puts "📄 Processing: #{file_path}"
   puts "="*60
-  
+
   begin
     processor = InvoiceProcessor.new([file_path])
     data = processor.process_invoice
     display_preview(data)
-    
+
     if ask_for_confirmation
       puts "Creating expense in Holded..."
-      create_expense_in_holded(data, file_path)
+      result = create_expense_in_holded(data, file_path)
+      if result
+        { status: :ok, file: file_path }
+      else
+        { status: :wrong, file: file_path, error: "Failed to create expense in Holded" }
+      end
     else
       puts "Operation cancelled for this file."
+      { status: :wrong, file: file_path, error: "Operation cancelled by user" }
     end
   rescue => e
     puts "❌ Error processing #{file_path}: #{e.message}"
+    { status: :wrong, file: file_path, error: e.message }
   end
 end
 
 def process_directory(directory_path)
   pdf_files = find_pdf_files(directory_path)
-  
+
   if pdf_files.empty?
     puts "No PDF files found in directory: #{directory_path}"
     return
@@ -93,12 +100,39 @@ def process_directory(directory_path)
   end
   puts
 
+  results = []
   pdf_files.each_with_index do |file_path, index|
     puts "\n🔄 Processing file #{index + 1} of #{pdf_files.length}"
-    process_single_file(file_path)
+    result = process_single_file(file_path)
+    results << result
   end
 
   puts "\n✅ All files processed!"
+
+  # Print summary
+  puts "\n" + "="*60
+  puts "📊 PROCESSING SUMMARY"
+  puts "="*60
+
+  results.each do |result|
+    file_name = File.basename(result[:file])
+    if result[:status] == :ok
+      puts "✅ OK   - #{file_name}"
+    else
+      puts "❌ WRONG - #{file_name}"
+      puts "         Error: #{result[:error]}" if result[:error]
+    end
+  end
+
+  # Print totals
+  ok_count = results.count { |r| r[:status] == :ok }
+  wrong_count = results.count { |r| r[:status] == :wrong }
+
+  puts "\n" + "-"*60
+  puts "Total files: #{results.length}"
+  puts "✅ Successful: #{ok_count}"
+  puts "❌ Failed: #{wrong_count}"
+  puts "="*60
 end
 
 def process_single_file_mode(file_path)
