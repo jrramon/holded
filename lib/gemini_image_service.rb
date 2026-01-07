@@ -7,66 +7,124 @@ require 'securerandom'
 class GeminiImageService
   def initialize(api_key = nil)
     @api_key = api_key || ENV['GEMINI_API']
-    @base_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    @base_url = "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent"
   end
 
   def extract_invoice_data(file_path)
-    image_path = file_path
-    temp_image = nil
-    begin
-      if File.extname(file_path).downcase == '.pdf'
-        temp_image = convert_pdf_to_image(file_path)
-        image_path = temp_image
-      end
-      image_b64 = encode_image(image_path)
-      prompt = build_prompt
-      body = {
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: prompt },
-              { inline_data: { mime_type: "image/jpeg", data: image_b64 } }
-            ]
-          }
-        ]
-      }
-      response = HTTParty.post(
-        "#{@base_url}?key=#{@api_key}",
-        body: body.to_json,
-        headers: { 'Content-Type' => 'application/json' }
-      )
-      unless response.success?
-        raise "Gemini API error: #{response.body}"
-      end
-      content = response.parsed_response.dig('candidates', 0, 'content', 'parts', 0, 'text')
-      json_str = extract_json_from_text(content)
-      data = JSON.parse(json_str, symbolize_names: true)
+    # Try with standard quality first, then retry with lower quality if needed
+    attempts = [false, true] # false = standard quality, true = low quality
+    
+    attempts.each_with_index do |low_quality, attempt|
+      image_path = file_path
+      temp_image = nil
       
-      # Clean vendor_id by removing hyphens
-      if data[:vendor_id]
-        data[:vendor_id] = data[:vendor_id].gsub('-', '')
+      begin
+        if File.extname(file_path).downcase == '.pdf'
+          temp_image = convert_pdf_to_image(file_path, low_quality: low_quality)
+          image_path = temp_image
+        end
+        
+        image_b64 = encode_image(image_path)
+        prompt = build_prompt
+        body = {
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: "image/jpeg", data: image_b64 } }
+              ]
+            }
+          ]
+        }
+        
+        response = HTTParty.post(
+          "#{@base_url}?key=#{@api_key}",
+          body: body.to_json,
+          headers: { 'Content-Type' => 'application/json' }
+        )
+        
+        unless response.success?
+          raise "Gemini API error: #{response.body}"
+        end
+        
+        parsed_response = response.parsed_response
+        candidate = parsed_response.dig('candidates', 0)
+        
+        if candidate.nil?
+          raise "No candidates in Gemini response"
+        end
+        
+        finish_reason = candidate['finishReason']
+        if finish_reason != 'STOP'
+          case finish_reason
+          when 'SAFETY'
+            raise "Content blocked by safety filters"
+          when 'MAX_TOKENS'
+            raise "Response truncated due to max tokens limit"
+          when 'OTHER'
+            if attempt == 0 # First attempt failed, try with lower quality
+              puts "⚠️  Retrying with lower quality settings..."
+              next
+            else
+              raise "Model encountered an internal error even with lower quality settings"
+            end
+          else
+            raise "Unexpected finish reason: #{finish_reason}"
+          end
+        end
+        
+        content = candidate.dig('content', 'parts', 0, 'text')
+        
+        if content.nil?
+          raise "API returned nil content despite STOP finish reason"
+        end
+        
+        json_str = extract_json_from_text(content)
+        data = JSON.parse(json_str, symbolize_names: true)
+        
+        # Clean vendor_id by removing hyphens
+        if data[:vendor_id]
+          data[:vendor_id] = data[:vendor_id].gsub('-', '')
+        end
+        
+        return data # Success! Return the data
+        
+      rescue => e
+        if attempt == attempts.length - 1 # Last attempt
+          raise "Failed to extract invoice data from Gemini: #{e.message}"
+        end
+        # Continue to next attempt
+      ensure
+        File.delete(temp_image) if temp_image && File.exist?(temp_image)
       end
-      
-      data
-    rescue => e
-      raise "Failed to extract invoice data from Gemini: #{e.message}"
-    ensure
-      File.delete(temp_image) if temp_image && File.exist?(temp_image)
     end
   end
 
   private
 
-  def convert_pdf_to_image(pdf_path)
+  def convert_pdf_to_image(pdf_path, low_quality: false)
     temp_image = "/tmp/invoice_#{SecureRandom.hex(8)}.jpg"
-    MiniMagick::Tool::Convert.new do |convert|
-      convert.density(200)
-      convert.quality(90)
-      convert << "#{pdf_path}[0]"
-      convert << temp_image
+    
+    # Use MiniMagick::Image for PDF conversion
+    image = MiniMagick::Image.read(File.open(pdf_path, 'rb'))
+    image.format "jpg"
+    
+    if low_quality
+      # Lower quality settings for problematic PDFs
+      image.density 150
+      image.quality 70
+      image.resize "1200x1600>" # Limit max size
+    else
+      # Standard quality settings
+      image.density 200
+      image.quality 90
     end
+    
+    image.write temp_image
     temp_image
+  rescue => e
+    raise "ImageMagick PDF conversion failed: #{e.message}"
   end
 
   def encode_image(image_path)
@@ -125,6 +183,7 @@ JSON:
   end
 
   def extract_json_from_text(text)
+    return nil if text.nil?
     match = text.match(/\{.*\}/m)
     match ? match[0] : text
   end
