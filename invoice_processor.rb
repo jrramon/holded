@@ -2,7 +2,11 @@
 
 require_relative 'lib/invoice_processor'
 require_relative 'lib/holded_service'
+require_relative 'lib/preview_server'
+require_relative 'lib/mock_gemini_service'
 require 'find'
+
+$test_mode = ARGV.delete('--test')
 
 def find_pdf_files(directory)
   pdf_files = []
@@ -63,11 +67,11 @@ def process_single_file(file_path)
   puts "="*60
 
   begin
-    processor = InvoiceProcessor.new([file_path])
+    gemini = $test_mode ? MockGeminiService.new : nil
+    processor = InvoiceProcessor.new([file_path], gemini_service: gemini)
     data = processor.process_invoice
-    display_preview(data)
 
-    if ask_for_confirmation
+    if PreviewServer.confirm?(data, file_path)
       puts "Creating expense in Holded..."
       result = create_expense_in_holded(data, file_path)
       if result
