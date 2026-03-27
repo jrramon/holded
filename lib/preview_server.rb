@@ -7,17 +7,18 @@ class PreviewServer < Sinatra::Base
   set :host_authorization, { permitted_hosts: [] }
 
   class << self
-    attr_accessor :jobs, :current_index, :results
+    attr_accessor :jobs, :current_index, :results, :on_confirm
   end
 
-  def self.setup_batch(jobs)
+  def self.setup_batch(jobs, on_confirm: nil)
     self.jobs = jobs
     self.current_index = 0
     self.results = []
+    self.on_confirm = on_confirm
   end
 
-  def self.process_batch(jobs)
-    setup_batch(jobs)
+  def self.process_batch(jobs, on_confirm: nil)
+    setup_batch(jobs, on_confirm: on_confirm)
 
     port = 4567
     system("open", "http://localhost:#{port}")
@@ -54,14 +55,29 @@ class PreviewServer < Sinatra::Base
 
   post '/confirm' do
     job = self.class.jobs[self.class.current_index]
-    self.class.results << { file_path: job[:file_path], confirmed: true }
+    line_items = []
+    (params['line_items'] || {}).each_value do |item|
+      line_items << { description: item['description'], amount: item['amount'], tax_percentage: item['tax_percentage'] }
+    end
+    edited_data = {
+      invoice_number: params['invoice_number'],
+      date: params['date'],
+      vendor_name: params['vendor_name'],
+      vendor_id: params['vendor_id'],
+      total_amount: params['total_amount'],
+      tax_amount: params['tax_amount'],
+      line_items: line_items
+    }
+    result = { file_path: job[:file_path], confirmed: true, data: edited_data }
+    self.class.on_confirm&.call(result)
+    self.class.results << result
     self.class.current_index += 1
     redirect '/'
   end
 
   post '/cancel' do
     job = self.class.jobs[self.class.current_index]
-    self.class.results << { file_path: job[:file_path], confirmed: false }
+    self.class.results << { file_path: job[:file_path], confirmed: false, data: nil }
     self.class.current_index += 1
     redirect '/'
   end
@@ -87,6 +103,8 @@ class PreviewServer < Sinatra::Base
         table { width: 100%; border-collapse: collapse; margin: 16px 0; }
         th, td { padding: 8px 12px; border: 1px solid #ddd; text-align: left; }
         th { background: #f5f5f5; width: 180px; }
+        input[type="text"] { width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; font-family: inherit; }
+        input[type="text"]:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
         .actions { display: flex; gap: 12px; margin-top: 24px; }
         button { padding: 12px 32px; font-size: 16px; border: none; border-radius: 6px; cursor: pointer; }
         .confirm { background: #22c55e; color: white; }
@@ -105,35 +123,33 @@ class PreviewServer < Sinatra::Base
       <div class="form-panel">
         <h1>Invoice Preview</h1>
         <p class="progress">File <%= position %> of <%= total %> &mdash; <%= filename %></p>
-        <table>
-          <tr><th>Invoice Number</th><td><%= data[:invoice_number] %></td></tr>
-          <tr><th>Date</th><td><%= data[:date] %></td></tr>
-          <tr><th>Vendor</th><td><%= data[:vendor_name] %></td></tr>
-          <tr><th>Vendor ID (CIF/NIF)</th><td><%= data[:vendor_id] %></td></tr>
-          <tr><th>Total Amount</th><td><%= data[:total_amount] %></td></tr>
-          <tr><th>Tax Amount</th><td><%= data[:tax_amount] %></td></tr>
-        </table>
+        <form method="post" action="/confirm">
+          <table>
+            <tr><th>Invoice Number</th><td><input type="text" name="invoice_number" value="<%= data[:invoice_number] %>"></td></tr>
+            <tr><th>Date</th><td><input type="text" name="date" value="<%= data[:date] %>"></td></tr>
+            <tr><th>Vendor</th><td><input type="text" name="vendor_name" value="<%= data[:vendor_name] %>"></td></tr>
+            <tr><th>Vendor ID (CIF/NIF)</th><td><input type="text" name="vendor_id" value="<%= data[:vendor_id] %>"></td></tr>
+            <tr><th>Total Amount</th><td><input type="text" name="total_amount" value="<%= data[:total_amount] %>"></td></tr>
+            <tr><th>Tax Amount</th><td><input type="text" name="tax_amount" value="<%= data[:tax_amount] %>"></td></tr>
+          </table>
 
-        <h3>Line Items</h3>
-        <table>
-          <tr><th>Description</th><th>Amount</th><th>Tax %</th></tr>
-          <% data[:line_items].each do |item| %>
-          <tr>
-            <td><%= item[:description] %></td>
-            <td><%= item[:amount] %></td>
-            <td><%= item[:tax_percentage] %></td>
-          </tr>
-          <% end %>
-        </table>
+          <h3>Line Items</h3>
+          <table>
+            <tr><th>Description</th><th>Amount</th><th>Tax %</th></tr>
+            <% data[:line_items].each_with_index do |item, i| %>
+            <tr>
+              <td><input type="text" name="line_items[<%= i %>][description]" value="<%= item[:description] %>"></td>
+              <td><input type="text" name="line_items[<%= i %>][amount]" value="<%= item[:amount] %>"></td>
+              <td><input type="text" name="line_items[<%= i %>][tax_percentage]" value="<%= item[:tax_percentage] %>"></td>
+            </tr>
+            <% end %>
+          </table>
 
-        <div class="actions">
-          <form method="post" action="/confirm">
+          <div class="actions">
             <button type="submit" class="confirm">Confirm</button>
-          </form>
-          <form method="post" action="/cancel">
-            <button type="submit" class="cancel">Cancel</button>
-          </form>
-        </div>
+            <button type="submit" class="cancel" formaction="/cancel">Cancel</button>
+          </div>
+        </form>
       </div>
     </body>
     </html>

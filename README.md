@@ -8,7 +8,8 @@ A Ruby application that processes invoice images/PDFs, extracts data using Googl
 - 🤖 AI-powered data extraction using Google Cloud Vision + Gemini
 - 💰 Automatic expense creation in Holded
 - 📎 File attachment to Holded documents
-- 🌐 Browser-based preview with embedded PDF viewer and extracted data side by side
+- 🌐 Browser-based preview with embedded PDF viewer and editable fields side by side
+- ✏️ Edit extracted data before confirming — expenses are created immediately on confirm
 - 📁 Batch processing of multiple files in a single browser session
 - 🧪 Test mode (`--test`) to preview UI without consuming API tokens
 
@@ -92,8 +93,8 @@ ruby invoice_processor.rb --test /path/to/invoices/
 
 1. **PDF Processing**: Converts PDF to high-quality image using ImageMagick
 2. **Data Extraction**: Sends image to Gemini AI for structured data extraction
-3. **Browser Preview**: Opens a local web page with the PDF on the left and extracted data on the right. For batch processing, all files are reviewed in a single browser session with automatic navigation between files.
-4. **Holded Integration**: Creates expense document in Holded for each confirmed invoice
+3. **Browser Preview**: Opens a local web page with the PDF on the left and editable extracted data on the right. All fields can be corrected before confirming. For batch processing, all files are reviewed in a single browser session with automatic navigation between files.
+4. **Holded Integration**: Creates expense document in Holded immediately upon confirming each invoice, using the edited data.
 5. **File Attachment**: Attaches the original PDF to the Holded document
 6. **Summary**: Shows processing results both in the browser and in the terminal
 

@@ -59,25 +59,26 @@ def process_files(file_paths)
 
   return if jobs.empty?
 
-  # Open browser for review
-  batch_results = PreviewServer.process_batch(jobs)
-
-  # Process confirmed files
+  # Process each confirmed file immediately via callback
   results = []
-  batch_results.each do |r|
+  on_confirm = proc do |r|
     file_path = r[:file_path]
     file_name = File.basename(file_path)
-    if r[:confirmed]
-      puts "\nCreating expense in Holded for #{file_name}..."
-      data = jobs.find { |j| j[:file_path] == file_path }[:data]
-      result = create_expense_in_holded(data, file_path)
-      if result
-        results << { status: :ok, file: file_path }
-      else
-        results << { status: :wrong, file: file_path, error: "Failed to create expense" }
-      end
+    puts "\nCreating expense in Holded for #{file_name}..."
+    result = create_expense_in_holded(r[:data], file_path)
+    if result
+      results << { status: :ok, file: file_path }
     else
-      results << { status: :wrong, file: file_path, error: "Cancelled by user" }
+      results << { status: :wrong, file: file_path, error: "Failed to create expense" }
+    end
+  end
+
+  batch_results = PreviewServer.process_batch(jobs, on_confirm: on_confirm)
+
+  # Add cancelled files to results
+  batch_results.each do |r|
+    unless r[:confirmed]
+      results << { status: :wrong, file: r[:file_path], error: "Cancelled by user" }
     end
   end
 

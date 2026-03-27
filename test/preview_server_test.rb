@@ -142,4 +142,83 @@ class PreviewServerTest < Minitest::Test
     assert_includes body, '<iframe'
     assert_includes body, '/pdf'
   end
+
+  def test_fields_are_editable_inputs
+    session = setup_app
+
+    session.get '/'
+    body = session.last_response.body
+    assert_includes body, 'name="invoice_number"'
+    assert_includes body, 'name="vendor_name"'
+    assert_includes body, 'name="date"'
+    assert_includes body, 'name="total_amount"'
+    assert_includes body, 'name="tax_amount"'
+    assert_includes body, 'name="vendor_id"'
+  end
+
+  def test_confirm_captures_edited_data
+    session = setup_app
+
+    session.post '/confirm', {
+      invoice_number: "EDITED-001",
+      date: "2026-06-01",
+      vendor_name: "Edited Corp",
+      vendor_id: "X99999999",
+      total_amount: "999.00",
+      tax_amount: "99.00",
+      "line_items[0][description]" => "Edited item",
+      "line_items[0][amount]" => "900.00",
+      "line_items[0][tax_percentage]" => "10"
+    }
+
+    result = PreviewServer.results.first
+    assert_equal true, result[:confirmed]
+    assert_equal "EDITED-001", result[:data][:invoice_number]
+    assert_equal "Edited Corp", result[:data][:vendor_name]
+    assert_equal "999.00", result[:data][:total_amount]
+    assert_equal "Edited item", result[:data][:line_items].first[:description]
+    assert_equal "900.00", result[:data][:line_items].first[:amount]
+    assert_equal "10", result[:data][:line_items].first[:tax_percentage]
+  end
+
+  def test_cancel_keeps_original_data
+    session = setup_app
+
+    session.post '/cancel'
+
+    result = PreviewServer.results.first
+    assert_equal false, result[:confirmed]
+    assert_nil result[:data]
+  end
+
+  def test_on_confirm_callback_called_immediately
+    callback_received = []
+    on_confirm = proc { |r| callback_received << r }
+
+    PreviewServer.setup_batch(two_jobs, on_confirm: on_confirm)
+    session = Rack::Test::Session.new(PreviewServer)
+
+    session.post '/confirm', { invoice_number: "INV-001", date: "2026-03-15",
+      vendor_name: "Acme Corp", vendor_id: "B12345678",
+      total_amount: "1210.00", tax_amount: "210.00",
+      "line_items[0][description]" => "Consulting",
+      "line_items[0][amount]" => "1000.00",
+      "line_items[0][tax_percentage]" => "21" }
+
+    assert_equal 1, callback_received.length
+    assert_equal true, callback_received.first[:confirmed]
+    assert_equal "/tmp/invoice1.pdf", callback_received.first[:file_path]
+  end
+
+  def test_on_confirm_callback_not_called_on_cancel
+    callback_received = []
+    on_confirm = proc { |r| callback_received << r }
+
+    PreviewServer.setup_batch(two_jobs, on_confirm: on_confirm)
+    session = Rack::Test::Session.new(PreviewServer)
+
+    session.post '/cancel'
+
+    assert_empty callback_received
+  end
 end
