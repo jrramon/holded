@@ -8,8 +8,9 @@ A Ruby application that processes invoice images/PDFs, extracts data using Googl
 - 🤖 AI-powered data extraction using Google Cloud Vision + Gemini
 - 💰 Automatic expense creation in Holded
 - 📎 File attachment to Holded documents
-- 🔍 Preview mode before creating expenses
-- 📁 Batch processing of multiple files
+- 🌐 Browser-based preview with embedded PDF viewer and extracted data side by side
+- 📁 Batch processing of multiple files in a single browser session
+- 🧪 Test mode (`--test`) to preview UI without consuming API tokens
 
 ## Setup
 
@@ -81,16 +82,20 @@ export GEMINI_API="$(cat keys/gemini_api_key.txt)"
 export HOLDED_API_KEY="$(cat keys/holded_api_key.txt)"
 
 ruby invoice_processor.rb invoice.pdf
+
+# Test mode (mock Gemini data, no API tokens spent)
+ruby invoice_processor.rb --test invoice.pdf
+ruby invoice_processor.rb --test /path/to/invoices/
 ```
 
 ## How It Works
 
 1. **PDF Processing**: Converts PDF to high-quality image using ImageMagick
-2. **Text Extraction**: Uses Google Cloud Vision to extract text from the image
-3. **Data Extraction**: Sends image to Gemini AI for structured data extraction
-4. **Preview**: Shows extracted data and asks for confirmation
-5. **Holded Integration**: Creates expense document in Holded with extracted data
-6. **File Attachment**: Attaches the original PDF to the Holded document
+2. **Data Extraction**: Sends image to Gemini AI for structured data extraction
+3. **Browser Preview**: Opens a local web page with the PDF on the left and extracted data on the right. For batch processing, all files are reviewed in a single browser session with automatic navigation between files.
+4. **Holded Integration**: Creates expense document in Holded for each confirmed invoice
+5. **File Attachment**: Attaches the original PDF to the Holded document
+6. **Summary**: Shows processing results both in the browser and in the terminal
 
 ## Extracted Data Fields
 
@@ -127,7 +132,9 @@ holded/
 │   ├── vision_service.rb       # Google Cloud Vision integration
 │   ├── gemini_image_service.rb # Gemini AI integration
 │   ├── holded_service.rb       # Holded API integration
-│   └── invoice_processor.rb    # Core processing logic
+│   ├── invoice_processor.rb    # Core processing logic
+│   ├── preview_server.rb       # Sinatra-based browser preview
+│   └── mock_gemini_service.rb  # Mock service for --test mode
 ├── keys/                       # API keys and credentials
 │   ├── arimidori-7a49f7f94661.json
 │   ├── gemini_api_key.txt

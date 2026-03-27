@@ -7,18 +7,17 @@ class PreviewServer < Sinatra::Base
   set :host_authorization, { permitted_hosts: [] }
 
   class << self
-    attr_accessor :last_result, :invoice_data, :pdf_path
+    attr_accessor :jobs, :current_index, :results
   end
 
-  def self.build_app(data, file_path)
-    self.invoice_data = data
-    self.pdf_path = file_path
-    self.last_result = nil
-    self
+  def self.setup_batch(jobs)
+    self.jobs = jobs
+    self.current_index = 0
+    self.results = []
   end
 
-  def self.confirm?(data, file_path)
-    build_app(data, file_path)
+  def self.process_batch(jobs)
+    setup_batch(jobs)
 
     port = 4567
     system("open", "http://localhost:#{port}")
@@ -26,32 +25,50 @@ class PreviewServer < Sinatra::Base
     set :port, port
     run!
 
-    last_result
+    results
   end
 
   get '/' do
-    data = self.class.invoice_data
-    filename = File.basename(self.class.pdf_path)
-    ERB.new(INDEX_TEMPLATE).result(binding)
+    jobs = self.class.jobs
+    index = self.class.current_index
+
+    if index < jobs.length
+      job = jobs[index]
+      data = job[:data]
+      filename = File.basename(job[:file_path])
+      total = jobs.length
+      position = index + 1
+      ERB.new(INDEX_TEMPLATE).result(binding)
+    else
+      results = self.class.results
+      ERB.new(SUMMARY_TEMPLATE).result(binding)
+    end
   end
 
   get '/pdf' do
+    job = self.class.jobs[self.class.current_index]
     content_type 'application/pdf'
     cache_control :no_store
-    send_file self.class.pdf_path
+    send_file job[:file_path]
   end
 
   post '/confirm' do
-    self.class.last_result = true
-    self.class.quit!
-    message = "Confirmed! You can close this tab."
-    ERB.new(DONE_TEMPLATE).result(binding)
+    job = self.class.jobs[self.class.current_index]
+    self.class.results << { file_path: job[:file_path], confirmed: true }
+    self.class.current_index += 1
+    redirect '/'
   end
 
   post '/cancel' do
-    self.class.last_result = false
+    job = self.class.jobs[self.class.current_index]
+    self.class.results << { file_path: job[:file_path], confirmed: false }
+    self.class.current_index += 1
+    redirect '/'
+  end
+
+  post '/done' do
     self.class.quit!
-    message = "Cancelled. You can close this tab."
+    message = "All done! You can close this tab."
     ERB.new(DONE_TEMPLATE).result(binding)
   end
 
@@ -76,8 +93,9 @@ class PreviewServer < Sinatra::Base
         .confirm:hover { background: #16a34a; }
         .cancel { background: #ef4444; color: white; }
         .cancel:hover { background: #dc2626; }
-        h1 { color: #333; margin-bottom: 16px; }
+        h1 { color: #333; margin-bottom: 4px; }
         h3 { color: #555; margin-top: 20px; }
+        .progress { color: #888; margin-bottom: 16px; }
       </style>
     </head>
     <body>
@@ -86,7 +104,7 @@ class PreviewServer < Sinatra::Base
       </div>
       <div class="form-panel">
         <h1>Invoice Preview</h1>
-        <p style="color:#666; margin-bottom:12px;"><%= filename %></p>
+        <p class="progress">File <%= position %> of <%= total %> &mdash; <%= filename %></p>
         <table>
           <tr><th>Invoice Number</th><td><%= data[:invoice_number] %></td></tr>
           <tr><th>Date</th><td><%= data[:date] %></td></tr>
@@ -117,6 +135,51 @@ class PreviewServer < Sinatra::Base
           </form>
         </div>
       </div>
+    </body>
+    </html>
+  HTML
+
+  SUMMARY_TEMPLATE = <<~'HTML'
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Processing Summary</title>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; }
+        h1 { color: #333; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        th, td { padding: 10px 14px; border: 1px solid #ddd; text-align: left; }
+        th { background: #f5f5f5; }
+        .confirmed { color: #16a34a; font-weight: bold; }
+        .cancelled { color: #dc2626; font-weight: bold; }
+        .totals { margin: 20px 0; font-size: 18px; color: #333; }
+        button { padding: 12px 32px; font-size: 16px; border: none; border-radius: 6px; cursor: pointer; background: #3b82f6; color: white; margin-top: 16px; }
+        button:hover { background: #2563eb; }
+      </style>
+    </head>
+    <body>
+      <h1>Processing Summary</h1>
+      <table>
+        <tr><th>File</th><th>Status</th></tr>
+        <% results.each do |r| %>
+        <tr>
+          <td><%= File.basename(r[:file_path]) %></td>
+          <td class="<%= r[:confirmed] ? 'confirmed' : 'cancelled' %>">
+            <%= r[:confirmed] ? 'Confirmed' : 'Cancelled' %>
+          </td>
+        </tr>
+        <% end %>
+      </table>
+      <% confirmed_count = results.count { |r| r[:confirmed] } %>
+      <% cancelled_count = results.count { |r| !r[:confirmed] } %>
+      <p class="totals">
+        Confirmed: <%= confirmed_count %> &mdash; Cancelled: <%= cancelled_count %> &mdash; Total: <%= results.length %>
+      </p>
+      <form method="post" action="/done">
+        <button type="submit">Done</button>
+      </form>
     </body>
     </html>
   HTML
